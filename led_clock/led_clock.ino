@@ -28,6 +28,8 @@ unsigned long lastRunHalfSec = 0;
 #define NUM_LEDS 58
 
 CRGB leds[NUM_LEDS];
+byte brightness = 100;
+byte brightnessLevels[3]{100, 160, 230};
 bool tick = true;
 unsigned long lastTicking;
 int rgbColor[3];
@@ -59,7 +61,7 @@ char daysOfTheWeek[7][12] = {
 char timeServer[] = "time.google.com";
 int utcTimeOffset = 7;
 unsigned int localPort = 2390;
-unsigned long ntpSyncInterval = 30000;
+unsigned long ntpSyncInterval = 30000; //in millisecond
 unsigned long lastNTPSync = 0;
 
 unsigned long currentEpoch;
@@ -69,6 +71,8 @@ const int UDP_TIMEOUT = 2000;
 
 RTC_DS3231 rtc;
 time_t epochTime;
+bool hour24Mode = true;
+bool forceSync = false;
 
 byte packetBuffer[NTP_PACKET_SIZE];
 
@@ -81,6 +85,18 @@ const bool espBoard = true;
 const bool espBoard = false;
 WiFiEspUDP udp;
 #endif
+
+const int buttonA = D4;
+bool buttonAState = false;
+bool lastButtonAState = false;
+unsigned long lastADebounceTime = 0;
+
+const int buttonB = D3;
+bool buttonBState = false;
+bool lastButtonBState = false;
+unsigned long lastBDebounceTime = 0;
+
+unsigned long debounceDelayTime = 50;
 
 int checkSection(int section);
 void digitZero(int section, int colors[]);
@@ -144,11 +160,11 @@ GenericFP Digits[10] = {
     &digitEight,
     &digitNine};
 
-void drawHours(bool hours24 = true)
+void drawHours()
 {
   DateTime now = rtc.now();
   int hours = now.hour();
-  if (!hours24)
+  if (!hour24Mode)
   {
     if (hours > 12)
     {
@@ -157,8 +173,17 @@ void drawHours(bool hours24 = true)
   }
   int ones = hours % 10;
   int tens = (hours / 10) % 10;
+  if (tens != 0)
+  {
+    Digits[tens](4, rgbColor);
+  }
+  else
+  {
+    int black[3] = {0, 0, 0};
+    Digits[tens](4, black);
+  }
+
   Digits[ones](3, rgbColor);
-  Digits[tens](4, rgbColor);
 }
 
 void drawMinutes()
@@ -173,8 +198,10 @@ void drawMinutes()
 
 void setup()
 {
-
+  pinMode(buttonA, INPUT_PULLUP);
+  pinMode(buttonB, INPUT_PULLUP);
   FastLED.addLeds<WS2812, LED_PIN, GRB>(leds, NUM_LEDS);
+  FastLED.setMaxPowerInVoltsAndMilliamps(5, 750);
   allOff();
   changeColorAllWave(20, 20, 150, 50);
   Serial.begin(115200);
@@ -243,11 +270,63 @@ void loop()
   rgbColor[2] = 255;
   unsigned long currentMillis = millis();
 
-  if (currentMillis - lastNTPSync >= ntpSyncInterval)
+  // Serial.println(digitalRead(buttonA));
+  // Serial.println(digitalRead(buttonB));
+  bool readingA = digitalRead(buttonA);
+
+  if (readingA != lastButtonAState)
+  {
+    lastADebounceTime = millis();
+  }
+
+  if ((millis() - lastADebounceTime) > debounceDelayTime)
+  {
+    if (readingA != buttonAState)
+    {
+      buttonAState = readingA;
+      if (!buttonAState)
+      {
+        //WHEN BUTTON A CLICKED
+        Serial.println("Button A clicked");
+        //change hour 24 mode
+        hour24Mode = !hour24Mode;
+        drawHours();
+      }
+    }
+  }
+  lastButtonAState = readingA;
+
+  bool readingB = digitalRead(buttonB);
+
+  if (readingB != lastButtonBState)
+  {
+    lastBDebounceTime = millis();
+  }
+
+  if ((millis() - lastBDebounceTime) > debounceDelayTime)
+  {
+    if (readingB != buttonBState)
+    {
+      buttonBState = readingB;
+      if (!buttonBState)
+      {
+        //WHEN BUTTON A CLICKED
+        Serial.println("Button B clicked");
+        forceSync = true;
+      }
+    }
+  }
+  lastButtonBState = readingB;
+
+  if ((currentMillis - lastNTPSync >= ntpSyncInterval) || forceSync)
   {
     if (updateNTP() && WiFi.status() == WL_CONNECTED)
     {
       setRTC();
+      if (forceSync)
+      {
+        forceSync = false;
+      }
     }
   }
 
